@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0a0a0a;
+  color: #cccccc;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+  overflow-x: hidden;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Panel base */
+.panel {
+  @apply bg-bloomberg-panel border border-bloomberg-border rounded;
+  overflow: hidden;
+}
+
+.panel-header {
+  @apply px-3 py-2 bg-bloomberg-header border-b border-bloomberg-border text-xs font-semibold uppercase tracking-wider flex items-center justify-between;
+}
+
+/* Ticker tape animation */
+@keyframes tickerScroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.ticker-scroll {
+  animation: tickerScroll 30s linear infinite;
+}
+
+/* Blinking cursor */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.blink {
+  animation: blink 1s step-end infinite;
+}
+
+/* Status badge glow */
+.badge-critical {
+  @apply text-bloomberg-red;
+  text-shadow: 0 0 8px rgba(255, 59, 59, 0.5);
+}
+.badge-conditional {
+  @apply text-bloomberg-amber;
+  text-shadow: 0 0 8px rgba(255, 183, 0, 0.5);
+}
+.badge-proceed {
+  @apply text-bloomberg-green;
+  text-shadow: 0 0 8px rgba(0, 210, 106, 0.5);
+}
+
+/* Form inputs */
+input[type="number"],
+input[type="text"],
+select,
+textarea {
+  @apply bg-black border border-bloomberg-border text-bloomberg-text text-xs font-mono px-2 py-1 rounded focus:border-bloomberg-cyan focus:outline-none;
+}
+
+button {
+  @apply font-mono;
+}
+
+/* Table styling */
+table {
+  @apply w-full text-xs;
+}
+th {
+  @apply text-left px-2 py-1.5 text-bloomberg-muted font-semibold uppercase tracking-wider border-b border-bloomberg-border;
+}
+td {
+  @apply px-2 py-1 border-b border-bloomberg-border/30;
+}

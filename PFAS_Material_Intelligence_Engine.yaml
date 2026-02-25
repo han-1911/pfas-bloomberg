@@ -1,0 +1,368 @@
+framework:
+  name: PFAS_Material_Intelligence_Engine
+  version: 1.0
+  description: >
+    Structured decision engine for PFAS treatability pre-feasibility screening.
+    Includes composition screening, species-based reactivity logic,
+    matrix interference screening, and dual-output reporting.
+
+# ============================================================
+# GLOBAL SETTINGS
+# ============================================================
+
+global:
+  unit_normalization:
+    accepted_units:
+      - ng/L
+      - ug/L
+      - µg/L
+      - mg/L
+      - ppm
+    normalize_to: mg/L
+    assumptions:
+      - 1 ppm == 1 mg/L (aqueous matrix assumption)
+
+  percent_calculation:
+    formula: "Ci / sum(Ci) * 100"
+
+  missing_data_policy:
+    treat_ND_as: unknown
+    treat_blank_as: unknown
+    do_not_assume_zero: true
+
+  output_modes:
+    - technical_full_output
+    - business_email_output
+
+# ============================================================
+# MODULE 1 — PFAS COMPOSITION & VARIABILITY
+# ============================================================
+
+modules:
+
+  - id: M1
+    name: PFAS_Composition_and_Variability
+    description: >
+      Identify dominant PFAS species.
+      Define Primary Set.
+      Detect multi-sample variability.
+
+    inputs:
+      required:
+        - pfas_species_table
+      optional:
+        - sample_id
+        - treatment_goal_text
+
+    primary_set_definition:
+      method: Top5_plus_secondary_extension
+      top_n: 5
+      secondary_threshold_percent: 5
+      definition: >
+        Primary Set = Top5 species by concentration
+        + all species with percent >= 5%.
+
+    rules:
+
+      - step: sort_species_descending_by_concentration
+
+      - step: compute_total_pfas
+
+      - step: compute_species_percent
+
+      - step: identify_top5
+
+      - step: compute_top5_cumulative_percent
+
+      - step: identify_secondary_species
+        condition: percent >= 5
+
+      - step: compute_primary_set_coverage
+
+      - step: compute_other_fraction
+        definition: 100 - top5_cumulative_percent
+
+      - step: detect_multi_sample_variability
+        method: max(total_pfas) / min(total_pfas)
+        high_variation_threshold: 10
+
+    outputs:
+
+      technical_full_output:
+        include:
+          - worst_case_sample
+          - top5_species_with_percent
+          - top5_cumulative_percent
+          - primary_set_coverage_percent
+          - other_fraction_percent
+          - multi_sample_variation_ratio
+          - operating_scenario_classification
+
+      business_email_output:
+        include:
+          - primary_species_summary
+          - primary_set_coverage_percent
+          - composition_conclusion
+          - operating_scenario_statement
+
+# ============================================================
+# MODULE 2 — SPECIES-BASED REACTIVITY SCREENING
+# ============================================================
+
+  - id: M2
+    name: Primary_PFAS_Reactivity_Screening
+    description: >
+      Apply species-class logic to Primary Set and treatment goals.
+      Generate Critical / Commercial / Technical flags.
+
+    dependencies:
+      requires_from_M1:
+        - primary_set_species
+        - total_pfas_concentration
+        - treatment_goal_text
+
+    matched_keywords:
+
+      TFA:
+        include:
+          - TFA
+          - Trifluoroacetic acid
+          - Trifluoroacetate
+          - CF3COOH
+          - CF3COO-
+          - 76-05-1
+
+      TFMS:
+        include:
+          - TFMS
+          - Trifluoromethanesulfonate
+          - Trifluoromethanesulfonic acid
+          - Triflate
+          - CF3SO3-
+          - CF3SO3H
+          - 1493-13-6
+          - 358-23-6
+
+      PFESA_2plus2:
+        include:
+          - Perfluoro(2-ethoxyethane)sulfonic acid
+          - Perfluoro(2-ethoxyethane)sulfonate
+          - 2+2 PFESA
+          - 2:2 PFESA
+          - 113507-82-7
+        exclude:
+          - F-53B
+          - 73606-19-6
+
+      ether_carboxylate:
+        include:
+          - HFPO-DA
+          - GenX
+          - ADONA
+          - F-53B
+          - 13252-13-6
+          - 919005-14-4
+
+      telomer_pattern:
+        regex:
+          - "\b(\d+):(\d+)\s*FTSA\b"
+          - "\b(\d+):(\d+)\s*FTCA\b"
+
+    rules:
+
+      - id: R1
+        name: TFMS_Critical
+        priority: 1
+        trigger:
+          - TFMS present in primary_set OR goal
+        output:
+          classification: CRITICAL
+          message: >
+            TFMS detected. Technology cannot treat TFMS.
+            Confirm whether TFMS is part of primary goal.
+
+      - id: R2
+        name: PFESA_2plus2_Critical
+        priority: 2
+        trigger:
+          - PFESA_2plus2 present in primary_set OR goal
+        output:
+          classification: CRITICAL
+          message: >
+            2+2 PFESA detected. Technology cannot treat 2+2 PFESA.
+            Confirm whether this is a primary goal.
+
+      - id: R3
+        name: TFA_Commercial
+        priority: 3
+        trigger:
+          - TFA present
+        output:
+          classification: COMMERCIAL
+          message: >
+            TFA detected. Highlight differentiated TFA capability.
+
+      - id: R4
+        name: PFSA_Kinetics
+        priority: 4
+        trigger:
+          - PFSA fraction in Primary Set > 20%
+        output:
+          classification: TECHNICAL
+          message: >
+            PFSA fraction >20%. Reaction rate may be impacted.
+
+      - id: R5
+        name: Short_Telomer_Pathway
+        priority: 5
+        trigger:
+          - telomer detected AND m < 4
+        output:
+          classification: PATHWAY
+          message: >
+            Short fluorotelomer detected. Oxidation often preferred over reduction.
+
+      - id: R6
+        name: Ether_Carboxylate_Check
+        priority: 6
+        trigger:
+          - ether_carboxylate detected AND not PFESA_2plus2
+        output:
+          classification: SPECIAL_HANDLING
+          message: >
+            Ether PFAS (carboxylate) detected. No immediate composition-based concern.
+
+      - id: R99
+        name: Proceed_Condition
+        priority: 99
+        trigger:
+          - All primary species are PFCA
+          - Total PFAS < 50 ppm
+        output:
+          classification: PROCEED
+          message: >
+            No composition-based concern. Proceed.
+
+# ============================================================
+# MODULE 3 — WATER MATRIX SCREENING
+# ============================================================
+
+  - id: M3
+    name: Water_Matrix_Screening
+    description: >
+      Evaluate organic load, nitrate/nitrite inhibition,
+      and engineering/analytical considerations.
+
+    inputs:
+      optional:
+        - COD_mgL
+        - TOC_mgL
+        - NO3_as_ion_mgL
+        - NO2_as_ion_mgL
+        - NO3_asN_mgL
+        - NO2_asN_mgL
+        - UV254
+        - UVT254
+        - sample_color
+        - precipitation_indicator
+        - chloride_mgL
+        - fluoride_mgL
+        - hardness_as_CaCO3_mgL
+
+    conversions:
+      nitrate_nitrite:
+        NO3_as_ion_mgL: NO3_asN_mgL * 4.43
+        NO2_as_ion_mgL: NO2_asN_mgL * 3.29
+
+    required_information:
+      - COD or TOC
+      - Nitrate or Nitrite
+
+    recommended_information:
+      - UV254 or UVT254
+      - Sample color
+      - Precipitation indicator
+
+    rules:
+
+      - id: M3_R1
+        name: Organics_Check
+        thresholds:
+          COD_max: 250
+          TOC_max: 100
+        logic:
+          if both_present:
+            require: COD <= 250 AND TOC <= 100
+          if_only_one_present:
+            require: value <= threshold
+        outputs:
+          acceptable: "Organics within acceptable range."
+          high: >
+            Organic load high. Pretreatment likely required.
+            Extend project timeline to ~8 weeks.
+
+      - id: M3_R2
+        name: Nitrate_Nitrite_Inhibition
+        tiers_mgL:
+          manageable: < 1
+          moderate: 1-20
+          high: > 20
+        logic:
+          use_worst_case_between_NO3_and_NO2: true
+        outputs:
+          manageable: "Competition impact manageable."
+          moderate: "Adjust reagent ratio to overcome inhibition."
+          high: >
+            High nitrate/nitrite. Pretreatment (e.g., electrochemical reduction) required.
+
+      - id: M3_R3
+        name: Chloride_Corrosion
+        apply_only_if_present: true
+        threshold: 1000
+        output: >
+          Chloride >1000 mg/L. Engineering corrosion concern.
+
+      - id: M3_R4
+        name: Fluoride_TOF
+        apply_only_if_present: true
+        threshold: 100
+        output: >
+          Fluoride >100 mg/L. TOF quantification uncertainty likely increased.
+
+      - id: M3_R5
+        name: Hardness_Precipitation
+        apply_only_if_present: true
+        threshold: 100
+        output: >
+          Hardness >100 ppm. Precipitation likely during caustic dosing.
+
+# ============================================================
+# PIPELINE
+# ============================================================
+
+pipeline:
+  execution_order:
+    - M1
+    - M2
+    - M3
+
+  final_status_logic:
+    if_any_CRITICAL: status = CRITICAL
+    else_if_matrix_high_or_missing_required: status = CONDITIONAL
+    else: status = PROCEED
+
+  report_sections:
+    - PFAS_Composition
+    - Reactivity_Flags
+    - Water_Matrix
+    - Overall_Status
+
+  dual_output:
+    technical_full_output:
+      detailed_sections: true
+      include_flag_classification: true
+      include_operating_scenarios: true
+    business_email_output:
+      concise_summary: true
+      include_action_items: true
+      omit_internal_mechanistic_details: true
